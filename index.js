@@ -11,11 +11,17 @@ app.use(express.json());
 
 // Database Setup
 let orders;
+let lookup_logs;
+
 async function connectDB() {
   try {
     const client = new MongoClient(process.env.MONGO_URI);
     await client.connect();
-    orders = client.db("veriship").collection("orders");
+
+    const db = client.db("veriship");
+    orders = db.collection("orders");
+    lookup_logs = db.collection("lookup_logs"); // NEW
+
     console.log("📦 Connected to MongoDB");
   } catch (error) {
     console.log("❌ MongoDB connection error:", error.message);
@@ -86,14 +92,33 @@ app.post("/risk-check", async (req, res) => {
       timestamp: new Date()
     };
 
-    if (orders) await orders.insertOne(response);
+    // Store Main Result (keeps original behavior)
+    if (orders) {
+  const write = await orders.insertOne(response);
+  console.log("📝 Saved to MongoDB:", write.insertedId);
+}
+
+
+    // Store Lookup Analytics (NEW – helps with business insights)
+    if (lookup_logs) {
+      await lookup_logs.insertOne({
+        phone,
+        score,
+        risk_level,
+        lookup_meta: response.lookup_meta,
+        searched_at: new Date(),
+        user_agent: req.headers["user-agent"] || null,
+        ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress,
+        source: "website"
+      });
+    }
 
     res.json(response);
 
   } catch (error) {
-    res.status(500).json({ 
+    res.status(500).json({
       error: "Verification API failed",
-      details: error.message 
+      details: error.message
     });
   }
 });
